@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig host="docker" id="82a0a3bd-fe32-4fc3-b79f-627ddf0f2579" keyPath="$PROJECT_DIR$/../../../Keys/Evotodi/evotodi-rsa-key_private.ppk" port="22" nameFormat="DESCRIPTIVE" username="root" useOpenSSHConfig="true" />
+    </configs>
+  </component>
+</project>
