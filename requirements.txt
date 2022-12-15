@@ -1,0 +1,5 @@
+requests~=2.28.1
+homie-spec==0.3.2
+paho-mqtt~=1.6.1
+pydantic~=1.9.1
+arrow~=1.2.2
