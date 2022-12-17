@@ -59,6 +59,22 @@ class Boiler:
             t *= val
         return r
 
+    @staticmethod
+    def _translate(value: float, leftMin: float, leftMax: float, rightMin: float, rightMax: float) -> float:
+        # Figure out how 'wide' each range is
+        leftSpan = leftMax - leftMin
+        rightSpan = rightMax - rightMin
+
+        # Convert the left range into a 0-1 range (float)
+        valueScaled = float(value - leftMin) / float(leftSpan)
+
+        # Convert the 0-1 range into a value in the right range.
+        return rightMin + (valueScaled * rightSpan)
+
+    @staticmethod
+    def _translate2(value: float, inMin: float, inMax: float, outMin: float, outMax: float):
+        return outMin + (float(value - inMin) / float(inMax - inMin) * (outMax - outMin))
+
     def _login(self) -> bool:
         if self._secA1 is None:
             self._secA1 = randint(0, 4294967296)
@@ -188,19 +204,14 @@ class Boiler:
             else:
                 bd.highLimit = self.CLOSED
 
-        # Bot Air
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,1")
+        # Bot / Top Air
+        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,2")
         val = self._parseXml(req.text)
         if val is not None:
-            val1 = float(int(f"{val:0{4}x}", 16)) * 0.1
-            bd.botAir = val1
-
-        # Top Air
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,1,4,1")
-        val = self._parseXml(req.text)
-        if val is not None:
-            val1 = float(int(f"{val:0{4}x}", 16)) * 0.1
+            val1 = float(int(f"{val:0{8}x}"[0:4], 16)) * 0.1
+            val2 = float(int(f"{val:0{8}x}"[4:8], 16)) * 0.1
             bd.topAir = val1
+            bd.botAir = val2
 
         # Water Temp / O2
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,18,0,0,4,2")
