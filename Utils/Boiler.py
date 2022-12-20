@@ -221,6 +221,11 @@ class Boiler:
             val2 = int(f"{val:0{8}x}"[4:8], 16)
 
             bd.waterTemp = self._regressTemp(val1)
+
+            # Check for out of wood
+            if bd.waterTemp <= self.config.shutdownTemp and bd.o2 >= self.config.shutdownO2:
+                bd.shutdown = self.CLOSED
+
             bd.o2 = self._regressO2(val2)
 
         self.lastUpdate = arrow.utcnow()

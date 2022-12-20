@@ -14,3 +14,5 @@ class Config(BaseModel):
     mqttBaseTopic: str = 'homie/'
 
     updateBoilerSeconds: int = 15
+    shutdownTemp: float = 119.0
+    shutdownO2: float = 10.0
