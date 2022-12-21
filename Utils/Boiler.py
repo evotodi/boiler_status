@@ -7,7 +7,9 @@ __all__ = [
 import logging
 import zlib
 from random import randint
-from typing import Any
+import numpy as np
+from scipy.stats import linregress
+from typing import TYPE_CHECKING
 
 import arrow
 import requests
@@ -15,6 +17,9 @@ import xml.etree.ElementTree as ET
 
 from Models.BoilerData import BoilerData
 from Models.config import Config
+
+if TYPE_CHECKING:
+    from scipy.stats._stats_mstats_common import LinregressResult
 
 class Boiler:
     logger = logging.getLogger()
@@ -25,8 +30,11 @@ class Boiler:
     _secA2 = None
     _secB1 = None
     _secB2 = None
-    CLOSED = "ON"
-    OPEN = "OFF"
+    _slopeArrayLen = 8
+    _lastXs = np.arange(stop=_slopeArrayLen)
+    _lastO2s = np.full(shape=(_slopeArrayLen,), fill_value=6.0, dtype=np.float64)
+    _lastTemps = np.full(shape=(_slopeArrayLen,), fill_value=180.0, dtype=np.float64)
+    _firstFun = True
 
     def __init__(self):
         self.config = Config()
@@ -75,6 +83,10 @@ class Boiler:
     def _translate2(value: float, inMin: float, inMax: float, outMin: float, outMax: float):
         return outMin + (float(value - inMin) / float(inMax - inMin) * (outMax - outMin))
 
+    @staticmethod
+    def _rangePercent(val: float, valMin: float, valMax: float) -> float:
+        return ((val - valMin) * 100) / (valMax - valMin)
+
     def _login(self) -> bool:
         if self._secA1 is None:
             self._secA1 = randint(0, 4294967296)
@@ -119,6 +131,24 @@ class Boiler:
             return val
         return int(val, 16)
 
+    def _addWaterTemp(self, val: float):
+        self._lastTemps = np.append(self._lastTemps, val)
+        self._lastTemps = np.delete(self._lastTemps, 0)
+        self.logger.debug(f"LastWaterTemps: {self._lastTemps}")
+
+    def _addO2(self, val: float):
+        self._lastO2s = np.append(self._lastO2s, val)
+        self._lastO2s = np.delete(self._lastO2s, 0)
+        self.logger.debug(f"LastO2s: {self._lastO2s}")
+
+    def _slopeWater(self) -> float:
+        lr = linregress(self._lastXs, self._lastTemps)  # type: LinregressResult
+        self.logger.debug(f"Water linear regression: {lr}")
+        return lr.slope
+
+    def _avgO2(self) -> float:
+        return np.average(self._lastO2s)
+
     def _updateBoiler(self):
         bd = BoilerData()
         if self._token is None:
@@ -146,63 +176,63 @@ class Boiler:
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.fan = self.CLOSED
+                bd.fan = True
             else:
-                bd.fan = self.OPEN
+                bd.fan = False
 
         # Shutdown
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,1,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.shutdown = self.OPEN
+                bd.shutdown = False
             else:
-                bd.shutdown = self.CLOSED
+                bd.shutdown = True
 
         # Alarm Lt
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,2,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.alarmLt = self.CLOSED
+                bd.alarmLt = True
             else:
-                bd.alarmLt = self.OPEN
+                bd.alarmLt = False
 
         # Low Water
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,0,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.lowWater = self.OPEN
+                bd.lowWater = False
             else:
-                bd.lowWater = self.CLOSED
+                bd.lowWater = True
 
         # Bypass
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,1,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.bypass = self.OPEN
+                bd.bypass = False
             else:
-                bd.bypass = self.CLOSED
+                bd.bypass = True
 
         # Cold Start
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,2,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.coldStart = self.CLOSED
+                bd.coldStart = True
             else:
-                bd.coldStart = self.OPEN
+                bd.coldStart = False
 
         # High Limit
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,3,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.highLimit = self.OPEN
+                bd.highLimit = False
             else:
-                bd.highLimit = self.CLOSED
+                bd.highLimit = True
 
         # Bot / Top Air
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,2")
@@ -211,7 +241,9 @@ class Boiler:
             val1 = float(int(f"{val:0{8}x}"[0:4], 16)) * 0.1
             val2 = float(int(f"{val:0{8}x}"[4:8], 16)) * 0.1
             bd.topAir = val1
+            bd.topAirPct = self._rangePercent(bd.topAir, self.config.topAirMin, self.config.topAirMax)
             bd.botAir = val2
+            bd.botAirPct = self._rangePercent(bd.botAir, self.config.botAirMin, self.config.botAirMax)
 
         # Water Temp / O2
         req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,18,0,0,4,2")
@@ -224,9 +256,36 @@ class Boiler:
 
             # Check for out of wood
             if bd.waterTemp <= self.config.shutdownTemp and bd.o2 >= self.config.shutdownO2:
-                bd.shutdown = self.CLOSED
+                bd.shutdown = True
 
             bd.o2 = self._regressO2(val2)
+
+            # Check for first run
+            if self._firstFun:
+                self._lastO2s = np.full(shape=(self._slopeArrayLen,), fill_value=bd.o2, dtype=np.float64)
+                self._lastTemps = np.full(shape=(self._slopeArrayLen,), fill_value=bd.waterTemp, dtype=np.float64)
+                self._firstFun = False
+
+            self._addWaterTemp(bd.waterTemp)
+            self._addO2(bd.o2)
+
+        # Check wood
+        waterSlope = self._slopeWater()
+        o2Avg = self._avgO2()
+        self.logger.debug(f"Temp slope: {waterSlope}")
+        self.logger.debug(f"O2 Avg: {o2Avg}")
+        if bd.shutdown:
+            # Probably no wood
+            bd.wood = False
+        elif o2Avg < self.config.shutdownO2:
+            # There should be wood
+            bd.wood = True
+        else:
+            # O2 is high
+            if waterSlope < 0.0 and bd.fan:
+                bd.wood = False
+            else:
+                bd.wood = True
 
         self.lastUpdate = arrow.utcnow()
         self.logger.info(f"Boiler updated. < {self.lastUpdate} >")

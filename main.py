@@ -4,11 +4,6 @@ import atexit
 import signal
 import sys
 
-import arrow
-import requests
-from random import randint
-import zlib
-
 from Models.BoilerData import BoilerData
 from Models.config import Config
 from homie_spec import Node as HomieNode, Property as HomieProperty, Message as HomieMessage
@@ -17,6 +12,7 @@ from Utils.HomieDevice import Device as HomieDevice, DeviceState as HomieDeviceS
 from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
+loglevel = logging.DEBUG
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
@@ -122,17 +118,20 @@ def publishBoilerDevice() -> HomieDevice:
         typeOf="boiler",
         properties={
             "time": HomieProperty(name="Time", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.ts.isoformat()),
-            "cold_start": HomieProperty(name="Cold Start", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.coldStart.__str__()),
-            "high_limit": HomieProperty(name="High Limit", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.highLimit.__str__()),
-            "low_water": HomieProperty(name="Low Water", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.lowWater.__str__()),
-            "bypass": HomieProperty(name="Bypass", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.bypass.__str__()),
-            "fan": HomieProperty(name="Fan", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.fan.__str__()),
-            "shutdown": HomieProperty(name="Shutdown", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.shutdown.__str__()),
-            "alarm_light": HomieProperty(name="Alarm Light", datatype=HomieDataType.BOOLEAN, get=lambda: currentBoilerData.alarmLt.__str__()),
-            "water_temp": HomieProperty(name="Water Temp", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.waterTemp:.2f}"),
-            "o2": HomieProperty(name="Oxygen", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.o2:.2f}"),
+            "cold_start": HomieProperty(name="Cold Start", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.coldStart else "OFF"),
+            "high_limit": HomieProperty(name="High Limit", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.highLimit else "OFF"),
+            "low_water": HomieProperty(name="Low Water", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.lowWater else "OFF"),
+            "bypass": HomieProperty(name="Bypass", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.bypass else "OFF"),
+            "fan": HomieProperty(name="Fan", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.fan else "OFF"),
+            "shutdown": HomieProperty(name="Shutdown", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.shutdown else "OFF"),
+            "alarm_light": HomieProperty(name="Alarm Light", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.alarmLt else "OFF"),
+            "water_temp": HomieProperty(name="Water Temp", datatype=HomieDataType.FLOAT, unit="°F", get=lambda: f"{currentBoilerData.waterTemp:.2f}"),
+            "o2": HomieProperty(name="Oxygen", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.o2:.2f}"),
             "bot_air": HomieProperty(name="Bottom Air", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.botAir:.2f}"),
+            "bot_air_pct": HomieProperty(name="Bottom Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.botAirPct:.2f}"),
             "top_air": HomieProperty(name="Top Air", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.topAir:.2f}"),
+            "top_air_pct": HomieProperty(name="Top Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.topAirPct:.2f}"),
+            "wood": HomieProperty(name="Wood", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.wood else "OFF"),
         }
     )
     _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node})
@@ -153,11 +152,14 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/water_temp')
     _publishHomie(boilerDevice, 'heatmaster/o2')
     _publishHomie(boilerDevice, 'heatmaster/bot_air')
+    _publishHomie(boilerDevice, 'heatmaster/bot_air_pct')
     _publishHomie(boilerDevice, 'heatmaster/top_air')
+    _publishHomie(boilerDevice, 'heatmaster/top_air_pct')
+    _publishHomie(boilerDevice, 'heatmaster/wood')
     logger.info("Published Boiler MQTT Data")
 
 if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)-16s %(levelname)-8s %(message)s', level=logging.INFO)
+    logging.basicConfig(format='%(asctime)-16s %(levelname)-8s %(message)s', level=loglevel)
     # mqtt.verbose = True
     mqtt.begin()
 

@@ -16,3 +16,8 @@ class Config(BaseModel):
     updateBoilerSeconds: int = 15
     shutdownTemp: float = 119.0
     shutdownO2: float = 10.0
+
+    botAirMin: float = 0.0
+    botAirMax: float = 100.0
+    topAirMin: float = 50.0
+    topAirMax: float = 75.0

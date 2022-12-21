@@ -3,3 +3,5 @@ homie-spec==0.3.2
 paho-mqtt~=1.6.1
 pydantic~=1.9.1
 arrow~=1.2.2
+numpy~=1.24.0
+scipy~=1.9.3
