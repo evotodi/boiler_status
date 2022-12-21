@@ -85,7 +85,12 @@ class Boiler:
 
     @staticmethod
     def _rangePercent(val: float, valMin: float, valMax: float) -> float:
-        return ((val - valMin) * 100) / (valMax - valMin)
+        x = ((val - valMin) * 100) / (valMax - valMin)
+        if x < 0.0:
+            x = 0.0
+        if x > 100.0:
+            x = 100.0
+        return x
 
     def _login(self) -> bool:
         if self._secA1 is None:
