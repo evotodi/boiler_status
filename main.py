@@ -12,7 +12,7 @@ from Utils.HomieDevice import Device as HomieDevice, DeviceState as HomieDeviceS
 from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
-loglevel = logging.DEBUG
+loglevel = logging.INFO
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
