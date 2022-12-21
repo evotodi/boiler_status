@@ -151,6 +151,11 @@ class Boiler:
         self.logger.debug(f"Water linear regression: {lr}")
         return lr.slope
 
+    def _slopeO2(self) -> float:
+        lr = linregress(self._lastXs, self._lastO2s)  # type: LinregressResult
+        self.logger.debug(f"O2 linear regression: {lr}")
+        return lr.slope
+
     def _avgO2(self) -> float:
         return np.average(self._lastO2s)
 
@@ -276,8 +281,10 @@ class Boiler:
 
         # Check wood
         waterSlope = self._slopeWater()
+        o2Slope = self._slopeO2()
         o2Avg = self._avgO2()
         self.logger.debug(f"Temp slope: {waterSlope}")
+        self.logger.debug(f"O2 slope: {o2Slope}")
         self.logger.debug(f"O2 Avg: {o2Avg}")
         if bd.shutdown:
             # Probably no wood

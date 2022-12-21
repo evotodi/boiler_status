@@ -25,6 +25,7 @@ class BoilerData(BaseModel):
     botAirPct: float = 0.0
     topAirPct: float = 0.0
     wood: bool = None  # ON = has wood, OFF = wood gone
+    # status: str = ""  # Boiler status
 
     class Config:
         arbitrary_types_allowed = True

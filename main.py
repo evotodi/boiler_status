@@ -12,7 +12,7 @@ from Utils.HomieDevice import Device as HomieDevice, DeviceState as HomieDeviceS
 from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
-loglevel = logging.INFO
+loglevel = logging.DEBUG
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
@@ -132,6 +132,7 @@ def publishBoilerDevice() -> HomieDevice:
             "top_air": HomieProperty(name="Top Air", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.topAir:.2f}"),
             "top_air_pct": HomieProperty(name="Top Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.topAirPct:.2f}"),
             "wood": HomieProperty(name="Wood", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.wood else "OFF"),
+            # "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status),
         }
     )
     _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node})
@@ -156,6 +157,7 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/top_air')
     _publishHomie(boilerDevice, 'heatmaster/top_air_pct')
     _publishHomie(boilerDevice, 'heatmaster/wood')
+    # _publishHomie(boilerDevice, 'heatmaster/status')
     logger.info("Published Boiler MQTT Data")
 
 if __name__ == '__main__':
