@@ -12,7 +12,8 @@ from Utils.HomieDevice import Device as HomieDevice, DeviceState as HomieDeviceS
 from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
-loglevel = logging.DEBUG
+loglevel = logging.INFO
+version: str = "1.0.4"
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
@@ -132,10 +133,10 @@ def publishBoilerDevice() -> HomieDevice:
             "top_air": HomieProperty(name="Top Air", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.topAir:.2f}"),
             "top_air_pct": HomieProperty(name="Top Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.topAirPct:.2f}"),
             "wood": HomieProperty(name="Wood", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.wood else "OFF"),
-            # "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status),
+            "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status.title()),
         }
     )
-    _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node})
+    _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node}, fw=version)
     for x in _boilerDevice.messages():  # type: HomieMessage
         mqtt.publishHomie(topic=x.topic, payload=x.payload, retain=x.retained, qos=x.qos)
     logger.info("Created MQTT Boiler Device")
@@ -157,7 +158,7 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/top_air')
     _publishHomie(boilerDevice, 'heatmaster/top_air_pct')
     _publishHomie(boilerDevice, 'heatmaster/wood')
-    # _publishHomie(boilerDevice, 'heatmaster/status')
+    _publishHomie(boilerDevice, 'heatmaster/status')
     logger.info("Published Boiler MQTT Data")
 
 if __name__ == '__main__':
@@ -172,5 +173,4 @@ if __name__ == '__main__':
         if boiler.timeToUpdate():
             logger.info("Time to update boiler")
             currentBoilerData = boiler.getData()
-            logger.info(currentBoilerData)
             publishBoilerData(boilerDev)

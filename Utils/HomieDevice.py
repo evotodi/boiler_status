@@ -22,6 +22,7 @@ class Device(NamedTuple):
     name: str
     nodes: Optional[Mapping[str, Node]] = None
     extensions: Optional[dict] = None
+    fw: Optional[str] = None
 
     implementation: str = "homie-spec"
     prefix: str = "homie"
@@ -45,6 +46,9 @@ class Device(NamedTuple):
         yield msg("$name", self.name)
         yield msg("$homie", HOMIE_VERSION)
         yield msg("$implementation", self.implementation)
+
+        if self.fw:
+            yield msg("$fw", self.fw)
 
         if self.extensions:
             payload_extensions = ",".join(self.extensions.keys())

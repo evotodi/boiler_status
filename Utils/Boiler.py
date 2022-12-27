@@ -5,6 +5,7 @@ __all__ = [
 ]
 
 import logging
+import time
 import zlib
 from random import randint
 import numpy as np
@@ -13,12 +14,14 @@ from typing import TYPE_CHECKING
 
 import arrow
 import requests
+# noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 
 from Models.BoilerData import BoilerData
 from Models.config import Config
 
 if TYPE_CHECKING:
+    # noinspection PyProtectedMember
     from scipy.stats._stats_mstats_common import LinregressResult
 
 class Boiler:
@@ -35,6 +38,13 @@ class Boiler:
     _lastO2s = np.full(shape=(_slopeArrayLen,), fill_value=6.0, dtype=np.float64)
     _lastTemps = np.full(shape=(_slopeArrayLen,), fill_value=180.0, dtype=np.float64)
     _firstFun = True
+    _statusTimerCycle = "timer cycle"
+    _statusIdle = "idle"
+    _statusHeating = "heating cycle"
+    _statusColdStart = "cold start mode"
+    _statusLowTemp = "low temp"
+    _session = requests.Session()
+    _lastWoodCheck: arrow.Arrow = arrow.get(0)
 
     def __init__(self):
         self.config = Config()
@@ -93,6 +103,17 @@ class Boiler:
         return x
 
     def _login(self) -> bool:
+        self._session = requests.Session()
+        self._session.headers = {
+            'Security-Hint': self._token,
+            'Cache-Control': 'no-cache,no-store,must-revalidate',
+            'Pragma': 'no-cache',
+            'Content-Encoding': 'gzip',
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate',
+            'App-Language': '1'
+        }
+
         if self._secA1 is None:
             self._secA1 = randint(0, 4294967296)
         if self._secA2 is None:
@@ -102,26 +123,25 @@ class Boiler:
         if self._secB2 is None:
             self._secB2 = randint(0, 4294967296)
 
-        req1 = requests.post(url=self.config.hmUrl, headers={'Security-Hint': 'p'}, data=f"UAMCHAL:3,4,{self._secA1},{self._secA2},{self._secB1},{self._secB2}")
-        # print(f"Login response = {req.text}")
+        req1 = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': 'p'}, data=f"UAMCHAL:3,4,{self._secA1},{self._secA2},{self._secB1},{self._secB2}")
+        self.logger.debug(f"Login response = {req1.text}")
         ret = req1.text.split(',')
         if len(ret) == 3 and ret[0] == "700":
             pwToken = f"{self.config.passwd}+{ret[2]}"
             pwToken = pwToken[0:32]
-            # print(f"pwToken = {pwToken}")
+            self.logger.debug(f"pwToken = {pwToken}")
             pwTokenCrc = zlib.crc32(pwToken.encode())
             iPWToken = pwTokenCrc ^ int(ret[2])
-            # print(f"iPWToken = {iPWToken}")
+            self.logger.debug(f"iPWToken = {iPWToken}")
             iServerChallenge = (((self._secA1 ^ self._secA2) ^ self._secB1) ^ self._secB2) ^ int(ret[2])
-            # print(f"iServerChallenge = {iServerChallenge}")
-            req2 = requests.post(url=self.config.hmUrl, headers={'Security-Hint': f'{ret[1]}'}, data=f"UAMLOGIN:Web User,{iPWToken},{iServerChallenge}")
-            # print(f"Login response = {req.text}")
+            self.logger.debug(f"iServerChallenge = {iServerChallenge}")
+            req2 = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': f'{ret[1]}'}, data=f"UAMLOGIN:Web User,{iPWToken},{iServerChallenge}")
+            self.logger.debug(f"Login response = {req2.text}")
             data = req2.text.split(',')
             if len(data) == 2 and data[0] == '700':
                 self._token = data[1]
                 return True
             else:
-                print("Login failed")
                 self.logger.error(f"Login failed: {req1.text}")
                 return False
 
@@ -135,6 +155,15 @@ class Boiler:
         if val is None:
             return val
         return int(val, 16)
+
+    def _parseXmlData(self, xml: str) -> ET.Element or None:
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError:
+            self.logger.error(f"Failed to parse: {xml}")
+            return None
+
+        return root
 
     def _addWaterTemp(self, val: float):
         self._lastTemps = np.append(self._lastTemps, val)
@@ -171,7 +200,7 @@ class Boiler:
 
         bd.ts = arrow.utcnow()
 
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETSTDG")
+        req = self._session.post(url=self.config.hmUrl, data="GETSTDG")
         if "Running" not in req.text:
             self.logger.info("Logging in after timeout")
             for _ in range(0, 4):
@@ -181,8 +210,41 @@ class Boiler:
                 self.boilerData = None
                 return
 
-        # Fan
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,0,1,1")
+        """ Status """
+        # Check for main page
+        el = ET.Element("")
+        for _ in range(0, 50):
+            req = self._session.post(url=self.config.hmUrl, data="MSGGET:bm,-1")
+            el = self._parseXmlData(req.text)
+            self.logger.debug(f"Request Response: {req.text}")
+            elType = el.get('type')
+            if elType.strip().lower() == 's':
+                elVal = el.find("./t[@id='0']").get('v')
+                self.logger.debug(f"EL Val: {elVal}")
+                if 'furnace status' not in elVal.strip().lower():
+                    # Click up arrow and try again
+                    self.logger.debug("Not status click up arrow")
+                    self._session.post(url=self.config.hmUrl, data="MSGCLICK:bm,1,1")
+                    time.sleep(2)
+                    continue
+                else:
+                    # found status screen
+                    self.logger.debug("Found status screen")
+                    break
+            else:
+                # Click up arrow and try again
+                self.logger.debug("Not data s click up arrow")
+                self._session.post(url=self.config.hmUrl, data="MSGCLICK:bm,1,1")
+                time.sleep(2)
+                continue
+
+        # Get furnace status
+        self.logger.debug("Getting status")
+        elVal = el.find("./t[@id='1']").get('v')
+        bd.status = elVal.strip().lower()
+
+        """ Fan """
+        req = self._session.post(url=self.config.hmUrl, data="GETVARS:v0,130,0,0,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -190,8 +252,8 @@ class Boiler:
             else:
                 bd.fan = False
 
-        # Shutdown
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,1,1,1")
+        """ Shutdown """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,1,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -199,8 +261,8 @@ class Boiler:
             else:
                 bd.shutdown = True
 
-        # Alarm Lt
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,2,1,1")
+        """ Alarm Lt """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,2,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -208,8 +270,8 @@ class Boiler:
             else:
                 bd.alarmLt = False
 
-        # Low Water
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,0,1,1")
+        """ Low Water """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,0,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -217,8 +279,8 @@ class Boiler:
             else:
                 bd.lowWater = True
 
-        # Bypass
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,1,1,1")
+        """ Bypass """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,1,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -226,8 +288,8 @@ class Boiler:
             else:
                 bd.bypass = True
 
-        # Cold Start
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,2,1,1")
+        """ Cold Start """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,2,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -235,8 +297,8 @@ class Boiler:
             else:
                 bd.coldStart = False
 
-        # High Limit
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,3,1,1")
+        """ High Limit """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,3,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
@@ -244,8 +306,8 @@ class Boiler:
             else:
                 bd.highLimit = True
 
-        # Bot / Top Air
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,2")
+        """ Bot / Top Air """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,2")
         val = self._parseXml(req.text)
         if val is not None:
             val1 = float(int(f"{val:0{8}x}"[0:4], 16)) * 0.1
@@ -255,8 +317,8 @@ class Boiler:
             bd.botAir = val2
             bd.botAirPct = self._rangePercent(bd.botAir, self.config.botAirMin, self.config.botAirMax)
 
-        # Water Temp / O2
-        req = requests.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,18,0,0,4,2")
+        """ Water Temp / O2 """
+        req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,18,0,0,4,2")
         val = self._parseXml(req.text)
         if val is not None:
             val1 = int(f"{val:0{8}x}"[0:4], 16)
@@ -279,29 +341,43 @@ class Boiler:
             self._addWaterTemp(bd.waterTemp)
             self._addO2(bd.o2)
 
-        # Check wood
-        waterSlope = self._slopeWater()
-        o2Slope = self._slopeO2()
-        o2Avg = self._avgO2()
-        self.logger.debug(f"Temp slope: {waterSlope}")
-        self.logger.debug(f"O2 slope: {o2Slope}")
-        self.logger.debug(f"O2 Avg: {o2Avg}")
-        if bd.shutdown:
-            # Probably no wood
-            bd.wood = False
-        elif o2Avg < self.config.shutdownO2:
-            # There should be wood
+        """ Check wood """
+        bd.waterSlope = self._slopeWater()
+        bd.o2Slope = self._slopeO2()
+        bd.o2Avg = self._avgO2()
+        self.logger.debug(f"Temp slope: {bd.waterSlope}")
+        self.logger.debug(f"O2 slope: {bd.o2Slope}")
+        self.logger.debug(f"O2 Avg: {bd.o2Avg}")
+        if bd.status == self._statusColdStart:
+            # There should be wood cold start pressed
             bd.wood = True
+            self._lastWoodCheck = arrow.utcnow()
+        elif bd.o2Avg < self.config.shutdownO2 or bd.bypass or bd.waterTemp >= self.config.noWoodWaterTemp:
+            # There should be wood if o2 percent is low or the bypass is open or temp is above noWoodWaterTemp
+            bd.wood = True
+            self._lastWoodCheck = arrow.utcnow()
+        elif bd.status == self._statusLowTemp:
+            self.logger.warning("Wood off by low temp")
+            bd.wood = False
         else:
-            # O2 is high
-            if waterSlope < 0.0 and bd.fan:
-                bd.wood = False
-            else:
-                bd.wood = True
+            # O2 is high and bypass is closed
+            if arrow.utcnow().shift(minutes=-self.config.noWoodCheckMins).replace(second=0) > self._lastWoodCheck:
+                # It has been long enough to check if out of wood
+                if bd.waterSlope < 0.0 and bd.waterTemp <= self.config.noWoodWaterTemp:
+                    self.logger.warning("Wood off by slope and temp")
+                    bd.wood = False
+                elif bd.waterTemp <= self.config.shutdownTemp:
+                    self.logger.warning("Wood off by shutdown temp")
+                    bd.wood = False
+                else:
+                    bd.wood = True
+                    self._lastWoodCheck = arrow.utcnow()
 
         self.lastUpdate = arrow.utcnow()
         self.logger.info(f"Boiler updated. < {self.lastUpdate} >")
+        self.logger.info(f"Boiler Data: {bd}")
         self.boilerData = bd
+        self._session.close()
 
     def getData(self) -> BoilerData:
         if arrow.utcnow().shift(seconds=-self.config.updateBoilerSeconds) > self.lastUpdate:
