@@ -4,6 +4,8 @@ import atexit
 import signal
 import sys
 
+import requests
+
 from Models.BoilerData import BoilerData
 from Models.config import Config
 from homie_spec import Node as HomieNode, Property as HomieProperty, Message as HomieMessage
@@ -104,8 +106,7 @@ def register_exit_func(fun, signals=_exit_signals):
 @register_exit_func
 def shutdown():
     logger.warning("Shutdown")
-    _bds = boilerDev.getter_state(HomieDeviceState.DISCONNECTED.payload)
-    mqtt.publishHomie(topic=_bds.topic, payload=_bds.payload, retain=_bds.retained, qos=_bds.qos)
+    publishBoilerStatus(HomieDeviceState.DISCONNECTED.payload)
     mqtt.stop()
 
 def _publishHomie(device: HomieDevice, path: str):
@@ -161,16 +162,42 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/status')
     logger.info("Published Boiler MQTT Data")
 
+def publishBoilerStatus(status: str):
+    bds = boilerDev.getter_state(status)
+    mqtt.publishHomie(topic=bds.topic, payload=bds.payload, retain=bds.retained, qos=bds.qos)
+
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)-16s %(levelname)-8s %(message)s', level=loglevel)
     # mqtt.verbose = True
     mqtt.begin()
 
-    currentBoilerData = boiler.getData()
+    connFailed = False
+    try:
+        currentBoilerData = boiler.getData()
+    except requests.exceptions.ConnectionError as ce:
+        print(ce)
+        connFailed = True
+
     boilerDev = publishBoilerDevice()
 
     while True:
         if boiler.timeToUpdate():
             logger.info("Time to update boiler")
-            currentBoilerData = boiler.getData()
+
+            connFailed = False
+            try:
+                currentBoilerData = boiler.getData()
+            except requests.exceptions.ConnectionError as ce:
+                print(ce)
+                connFailed = True
+
+            if not connFailed:
+                publishBoilerStatus(HomieDeviceState.READY.payload)
+                currentBoilerData = boiler.getData()
+            else:
+                logger.warning("Boiler is offline")
+                publishBoilerStatus(HomieDeviceState.ALERT.payload)
+                currentBoilerData = boiler.getOfflineData()
+
             publishBoilerData(boilerDev)
+

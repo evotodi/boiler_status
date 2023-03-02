@@ -43,6 +43,7 @@ class Boiler:
     _statusHeating = "heating cycle"
     _statusColdStart = "cold start mode"
     _statusLowTemp = "low temp"
+    _statusOffline = "OFFLINE"
     _session = requests.Session()
     _lastWoodCheck: arrow.Arrow = arrow.get(0)
 
@@ -391,3 +392,19 @@ class Boiler:
             return True
 
         return False
+
+    def getOfflineData(self) -> BoilerData:
+        bd = BoilerData()
+        bd.ts = arrow.utcnow()
+        bd.status = self._statusOffline
+        bd.coldStart = False
+        bd.highLimit = False
+        bd.alarmLt = True
+        bd.lowWater = False
+        bd.fan = False
+        bd.shutdown = True
+        bd.waterTemp = False
+        bd.wood = False
+        self.lastUpdate = arrow.utcnow()
+
+        return bd
