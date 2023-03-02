@@ -179,6 +179,7 @@ if __name__ == '__main__':
         connFailed = True
 
     boilerDev = publishBoilerDevice()
+    publishBoilerStatus(HomieDeviceState.READY.payload)
 
     while True:
         if boiler.timeToUpdate():
@@ -192,11 +193,9 @@ if __name__ == '__main__':
                 connFailed = True
 
             if not connFailed:
-                publishBoilerStatus(HomieDeviceState.READY.payload)
                 currentBoilerData = boiler.getData()
             else:
                 logger.warning("Boiler is offline")
-                publishBoilerStatus(HomieDeviceState.ALERT.payload)
                 currentBoilerData = boiler.getOfflineData()
 
             publishBoilerData(boilerDev)
