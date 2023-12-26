@@ -15,7 +15,7 @@ from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
 loglevel = logging.INFO
-version: str = "1.0.4"
+version: str = "1.0.5"
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
@@ -133,8 +133,10 @@ def publishBoilerDevice() -> HomieDevice:
             "bot_air_pct": HomieProperty(name="Bottom Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.botAirPct:.2f}"),
             "top_air": HomieProperty(name="Top Air", datatype=HomieDataType.FLOAT, get=lambda: f"{currentBoilerData.topAir:.2f}"),
             "top_air_pct": HomieProperty(name="Top Air Pct", datatype=HomieDataType.FLOAT, unit="%", get=lambda: f"{currentBoilerData.topAirPct:.2f}"),
-            "wood": HomieProperty(name="Wood", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.wood else "OFF"),
-            "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status.title()),
+            "wood_empty": HomieProperty(name="Wood Empty", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.woodEmpty else "OFF"),
+            "wood_low": HomieProperty(name="Wood Low", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.woodLow else "OFF"),
+            "condensing": HomieProperty(name="Condensing", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.condensing else "OFF"),
+            "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status.value.title()),
         }
     )
     _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node}, fw=version)
@@ -158,7 +160,9 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/bot_air_pct')
     _publishHomie(boilerDevice, 'heatmaster/top_air')
     _publishHomie(boilerDevice, 'heatmaster/top_air_pct')
-    _publishHomie(boilerDevice, 'heatmaster/wood')
+    _publishHomie(boilerDevice, 'heatmaster/wood_empty')
+    _publishHomie(boilerDevice, 'heatmaster/wood_low')
+    _publishHomie(boilerDevice, 'heatmaster/condensing')
     _publishHomie(boilerDevice, 'heatmaster/status')
     logger.info("Published Boiler MQTT Data")
 
@@ -199,4 +203,3 @@ if __name__ == '__main__':
                 currentBoilerData = boiler.getOfflineData()
 
             publishBoilerData(boilerDev)
-

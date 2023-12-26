@@ -17,7 +17,7 @@ import requests
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 
-from Models.BoilerData import BoilerData
+from Models.BoilerData import BoilerData, BoilerStatus
 from Models.config import Config
 
 if TYPE_CHECKING:
@@ -34,16 +34,11 @@ class Boiler:
     _secB1 = None
     _secB2 = None
     _slopeArrayLen = 8
+    # noinspection PyArgumentList
     _lastXs = np.arange(stop=_slopeArrayLen)
     _lastO2s = np.full(shape=(_slopeArrayLen,), fill_value=6.0, dtype=np.float64)
     _lastTemps = np.full(shape=(_slopeArrayLen,), fill_value=180.0, dtype=np.float64)
     _firstFun = True
-    _statusTimerCycle = "timer cycle"
-    _statusIdle = "idle"
-    _statusHeating = "heating cycle"
-    _statusColdStart = "cold start mode"
-    _statusLowTemp = "low temp"
-    _statusOffline = "OFFLINE"
     _session = requests.Session()
     _lastWoodCheck: arrow.Arrow = arrow.get(0)
 
@@ -189,6 +184,9 @@ class Boiler:
     def _avgO2(self) -> float:
         return np.average(self._lastO2s)
 
+    def _avgTemp(self) -> float:
+        return np.average(self._lastTemps)
+
     def _updateBoiler(self):
         bd = BoilerData()
         if self._token is None:
@@ -242,7 +240,19 @@ class Boiler:
         # Get furnace status
         self.logger.debug("Getting status")
         elVal = el.find("./t[@id='1']").get('v')
-        bd.status = elVal.strip().lower()
+        statusTemporary = elVal.strip().lower()
+        try:
+            bd.status = BoilerStatus(statusTemporary)
+        except ValueError as ve:
+            self.logger.error(ve)
+            bd.status = BoilerStatus.ERROR
+        self.logger.debug(f"DATA: Status: {bd.status}")
+
+        """ Check heating cycle started """
+        if bd.status == BoilerStatus.HEATING and bd.heatingStart is None:
+            bd.heatingStart = arrow.utcnow()
+        else:
+            bd.heatingStart = None
 
         """ Fan """
         req = self._session.post(url=self.config.hmUrl, data="GETVARS:v0,130,0,0,1,1")
@@ -252,6 +262,7 @@ class Boiler:
                 bd.fan = True
             else:
                 bd.fan = False
+            self.logger.debug(f"DATA: Fan: {bd.fan}")
 
         """ Shutdown """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,1,1,1")
@@ -261,6 +272,7 @@ class Boiler:
                 bd.shutdown = False
             else:
                 bd.shutdown = True
+            self.logger.debug(f"DATA: Shutdown: {bd.shutdown}")
 
         """ Alarm Lt """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,2,1,1")
@@ -270,6 +282,7 @@ class Boiler:
                 bd.alarmLt = True
             else:
                 bd.alarmLt = False
+            self.logger.debug(f"DATA: Alarm LT: {bd.alarmLt}")
 
         """ Low Water """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,0,1,1")
@@ -279,6 +292,7 @@ class Boiler:
                 bd.lowWater = False
             else:
                 bd.lowWater = True
+            self.logger.debug(f"DATA: Low Water: {bd.lowWater}")
 
         """ Bypass """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,1,1,1")
@@ -288,6 +302,7 @@ class Boiler:
                 bd.bypass = False
             else:
                 bd.bypass = True
+            self.logger.debug(f"DATA: Bypass: {bd.bypass}")
 
         """ Cold Start """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,2,1,1")
@@ -297,6 +312,7 @@ class Boiler:
                 bd.coldStart = True
             else:
                 bd.coldStart = False
+            self.logger.debug(f"DATA: Cold Start: {bd.coldStart}")
 
         """ High Limit """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,3,1,1")
@@ -306,6 +322,7 @@ class Boiler:
                 bd.highLimit = False
             else:
                 bd.highLimit = True
+            self.logger.debug(f"DATA: High Limit: {bd.highLimit}")
 
         """ Bot / Top Air """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,19,0,0,4,2")
@@ -317,6 +334,7 @@ class Boiler:
             bd.topAirPct = self._rangePercent(bd.topAir, self.config.topAirMin, self.config.topAirMax)
             bd.botAir = val2
             bd.botAirPct = self._rangePercent(bd.botAir, self.config.botAirMin, self.config.botAirMax)
+            self.logger.debug(f"DATA: Top Air: {bd.topAirPct}  Bottom Air: {bd.botAirPct}")
 
         """ Water Temp / O2 """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,18,0,0,4,2")
@@ -324,61 +342,89 @@ class Boiler:
         if val is not None:
             val1 = int(f"{val:0{8}x}"[0:4], 16)
             val2 = int(f"{val:0{8}x}"[4:8], 16)
+            self.logger.debug(f"DATA: Water Temp: {val1}")
+            self.logger.debug(f"DATA: O2: {val2}")
 
             bd.waterTemp = self._regressTemp(val1)
+            self.logger.debug(f"DATA: Water Temp regress: {bd.waterTemp}")
 
-            # Check for out of wood
-            if bd.waterTemp <= self.config.shutdownTemp and bd.o2 >= self.config.shutdownO2:
-                bd.shutdown = True
+            # # Check for out of wood
+            # if bd.waterTemp <= self.config.shutdownTemp and bd.o2 >= self.config.shutdownO2:
+            #     bd.shutdown = True
 
             bd.o2 = self._regressO2(val2)
+            self.logger.debug(f"DATA: O2 regress: {bd.o2}")
 
             # Check for first run
             if self._firstFun:
                 self._lastO2s = np.full(shape=(self._slopeArrayLen,), fill_value=bd.o2, dtype=np.float64)
                 self._lastTemps = np.full(shape=(self._slopeArrayLen,), fill_value=bd.waterTemp, dtype=np.float64)
-                self._firstFun = False
 
             self._addWaterTemp(bd.waterTemp)
             self._addO2(bd.o2)
 
         """ Check wood """
         bd.waterSlope = self._slopeWater()
+        bd.tempAvg = self._avgTemp()
         bd.o2Slope = self._slopeO2()
         bd.o2Avg = self._avgO2()
         self.logger.debug(f"Temp slope: {bd.waterSlope}")
+        self.logger.debug(f"Temp Avg: {bd.tempAvg}")
         self.logger.debug(f"O2 slope: {bd.o2Slope}")
         self.logger.debug(f"O2 Avg: {bd.o2Avg}")
-        if bd.status == self._statusColdStart:
-            # There should be wood cold start pressed
-            bd.wood = True
-            self._lastWoodCheck = arrow.utcnow()
-        elif bd.o2Avg < self.config.shutdownO2 or bd.bypass or bd.waterTemp >= self.config.noWoodWaterTemp:
-            # There should be wood if o2 percent is low or the bypass is open or temp is above noWoodWaterTemp
-            bd.wood = True
-            self._lastWoodCheck = arrow.utcnow()
-        elif bd.status == self._statusLowTemp:
-            self.logger.warning("Wood off by low temp")
-            bd.wood = False
-        else:
-            # O2 is high and bypass is closed
-            if arrow.utcnow().shift(minutes=-self.config.noWoodCheckMins).replace(second=0) > self._lastWoodCheck:
-                # It has been long enough to check if out of wood
-                if bd.waterSlope < 0.0 and bd.waterTemp <= self.config.noWoodWaterTemp:
-                    self.logger.warning("Wood off by slope and temp")
-                    bd.wood = False
-                elif bd.waterTemp <= self.config.shutdownTemp:
-                    self.logger.warning("Wood off by shutdown temp")
-                    bd.wood = False
+
+        if not bd.bypass:  # Bypass closed
+            if arrow.utcnow().shift(minutes=-self.config.woodEmptyCheckMins).replace(second=0) > self._lastWoodCheck:
+                # Check wood empty
+                if bd.shutdown:
+                    self.logger.warning("Wood off by shutdown")
+                    bd.woodEmpty = True
+                    bd.woodLow = True
+                elif bd.o2Avg >= self.config.woodEmptyO2 and bd.waterSlope < 0.0 and bd.condensing and bd.status == BoilerStatus.HEATING:
+                    self.logger.warning("Wood off by condensing and high o2")
+                    bd.woodEmpty = True
+                    bd.woodLow = True
+                elif bd.status == BoilerStatus.LOW_TEMP:
+                    self.logger.warning("Wood off by low temperature")
+                    bd.woodEmpty = True
+                    bd.woodLow = True
                 else:
-                    bd.wood = True
-                    self._lastWoodCheck = arrow.utcnow()
+                    bd.woodEmpty = False
+                    bd.woodLow = False
+
+                # Check wood low
+                if bd.o2Avg >= self.config.woodLowO2 and bd.waterSlope < 0.0 and not bd.condensing and bd.status == BoilerStatus.HEATING and \
+                        arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(seconds=0) > bd.heatingStart:
+                    # High O2 and cooling-off while heating for some time means low wood
+                    bd.woodLow = True
+                elif not bd.woodEmpty:
+                    bd.woodLow = False
+
+                # Update last wood check
+                self._lastWoodCheck = arrow.utcnow()
+
+        else:  # Bypass open
+            bd.woodEmpty = False
+            bd.woodLow = False
+            # Update last wood check plus some extra time
+            self._lastWoodCheck = arrow.utcnow().shift(minutes=+self.config.bypassOpenedWoodCheckMins)
+
+        """ Check Condensing """
+        if bd.tempAvg <= self.config.condensingTemp:
+            bd.condensing = True
+        else:
+            bd.condensing = False
+        self.logger.debug(f"Condensing: {bd.condensing}")
 
         self.lastUpdate = arrow.utcnow()
         self.logger.info(f"Boiler updated. < {self.lastUpdate} >")
         self.logger.info(f"Boiler Data: {bd}")
         self.boilerData = bd
         self._session.close()
+
+        """ First run done """
+        if self._firstFun:
+            self._firstFun = False
 
     def getData(self) -> BoilerData:
         if arrow.utcnow().shift(seconds=-self.config.updateBoilerSeconds) > self.lastUpdate:
@@ -396,7 +442,7 @@ class Boiler:
     def getOfflineData(self) -> BoilerData:
         bd = BoilerData()
         bd.ts = arrow.utcnow()
-        bd.status = self._statusOffline
+        bd.status = BoilerStatus.OFFLINE
         bd.coldStart = False
         bd.highLimit = False
         bd.alarmLt = True
@@ -404,7 +450,8 @@ class Boiler:
         bd.fan = False
         bd.shutdown = True
         bd.waterTemp = False
-        bd.wood = False
+        bd.woodEmpty = False
+        bd.woodLow = False
         self.lastUpdate = arrow.utcnow()
 
         return bd
