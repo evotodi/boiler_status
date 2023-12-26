@@ -409,6 +409,10 @@ class Boiler:
             # Update last wood check plus some extra time
             self._lastWoodCheck = arrow.utcnow().shift(minutes=+self.config.bypassOpenedWoodCheckMins)
 
+        """ Check Timer Cycle """
+        if bd.status == BoilerStatus.IDLE and bd.fan:
+            bd.status = BoilerStatus.TIMER_CYCLE
+
         """ Check Condensing """
         if bd.tempAvg <= self.config.condensingTemp:
             bd.condensing = True
