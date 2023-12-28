@@ -21,14 +21,32 @@ class BoilerStatus(Enum):
     ERROR = "ERROR"  # Not actual status message.
     NONE = ""  # Not actual status message.
 
+class TrackedBool:
+    changed: bool = False
+
+    def __init__(self, default: bool):
+        self._value: bool = default
+
+    @property
+    def value(self) -> bool:
+        return self._value
+
+    @value.setter
+    def value(self, val: bool):
+        if self._value != val:
+            self._value = val
+            self.changed = True
+        else:
+            self.changed = False
+
 class BoilerData(BaseModel):
     ts: Optional[arrow.Arrow]
-    coldStart: bool = None  # ON = cold start pressed
+    coldStart: TrackedBool = TrackedBool(False)  # ON = cold start pressed
     highLimit: bool = None  # ON = temp to high
     lowWater: bool = None  # ON = water low
-    bypass: bool = None  # ON = bypass lever open
+    bypass: TrackedBool = TrackedBool(False)  # ON = bypass lever open
     fan: bool = None  # ON = fan running
-    shutdown: bool = None  # ON = boiler shutdown, OFF = boiler ok
+    shutdown: TrackedBool = TrackedBool(False)  # ON = boiler shutdown, OFF = boiler ok
     alarmLt: bool = None  # ON = alarm light on
     waterTemp: float = 0.0
     o2: float = 0.0

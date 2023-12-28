@@ -13,7 +13,6 @@ from homie_spec.messages import Message
 from homie_spec.properties import Property
 from homie_spec.nodes import Node
 
-
 class Device(NamedTuple):
     """Object representation of a device according to the Homie topology"""
 
