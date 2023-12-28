@@ -5,3 +5,7 @@ services:
     container_name: BoilerPublisher
     restart: unless-stopped
     init: true
+    volumes:
+      - $PWD/Store:/app/Store
+#    environment:
+#      - LOGLEVEL=DEBUG

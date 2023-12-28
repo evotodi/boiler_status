@@ -17,6 +17,7 @@ import requests
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 
+from Database.Database import Dbase
 from Models.BoilerData import BoilerData, BoilerStatus
 from Models.config import Config
 
@@ -41,9 +42,11 @@ class Boiler:
     _firstFun = True
     _session = requests.Session()
     _lastWoodCheck: arrow.Arrow = arrow.get(0)
+    _db: Dbase = None
 
-    def __init__(self):
+    def __init__(self, db: Dbase):
         self.config = Config()
+        self._db = db
 
     @staticmethod
     def _regressO2(val: int) -> float:
@@ -272,10 +275,14 @@ class Boiler:
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.shutdown = False
+                bd.shutdown.value = False
             else:
-                bd.shutdown = True
-            self.logger.debug(f"DATA: Shutdown: {bd.shutdown}")
+                bd.shutdown.value = True
+
+            if bd.shutdown.changed:
+                self._db.eventShutdown(bd.shutdown.value)
+
+            self.logger.debug(f"DATA: Shutdown: {bd.shutdown.value}")
 
         """ Alarm Lt """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,130,0,2,1,1")
@@ -302,23 +309,30 @@ class Boiler:
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.bypass = False
+                bd.bypass.value = False
             else:
-                bd.bypass = True
+                bd.bypass.value = True
                 bd.lastBypassOpened = arrow.utcnow()
 
+            if bd.bypass.changed:
+                self._db.eventBypassOpened(bd.bypass.value)
+
             bd.lastBypassOpenedHuman = bd.lastBypassOpened.humanize()
-            self.logger.debug(f"DATA: Bypass: {bd.bypass}")
+            self.logger.debug(f"DATA: Bypass: {bd.bypass.value}")
 
         """ Cold Start """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,2,1,1")
         val = self._parseXml(req.text)
         if val is not None:
             if val > 0:
-                bd.coldStart = True
+                bd.coldStart.value = True
             else:
-                bd.coldStart = False
-            self.logger.debug(f"DATA: Cold Start: {bd.coldStart}")
+                bd.coldStart.value = False
+
+            if bd.coldStart.changed:
+                self._db.eventColdStart(bd.coldStart.value)
+
+            self.logger.debug(f"DATA: Cold Start: {bd.coldStart.value}")
 
         """ High Limit """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,3,1,1")
@@ -424,7 +438,7 @@ class Boiler:
         self.logger.debug(f"Wood: Empty = {bd.woodEmpty} Low = {bd.woodLow}")
 
         """ Check Timer Cycle """
-        if bd.status == BoilerStatus.IDLE and bd.fan:
+        if bd.status == BoilerStatus.IDLE and bd.fan and not bd.bypass:
             bd.status = BoilerStatus.TIMER_CYCLE
 
         """ Check Alarm Light """
