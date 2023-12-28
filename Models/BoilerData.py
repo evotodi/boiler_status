@@ -45,6 +45,8 @@ class BoilerData(BaseModel):
     tempAvg: float = 0.0
     heatingStart: Optional[arrow.Arrow] = None  # When the heating cycle started
     condensing: bool = False  # ON = Creosote forming, OFF = Heating properly
+    lastBypassOpened: Optional[arrow.Arrow] = arrow.get(0)
+    lastBypassOpenedHuman: str = ""
 
     class Config:
         arbitrary_types_allowed = True

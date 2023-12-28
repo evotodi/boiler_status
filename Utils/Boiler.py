@@ -188,7 +188,10 @@ class Boiler:
         return np.average(self._lastTemps)
 
     def _updateBoiler(self):
-        bd = BoilerData()
+        bd = self.boilerData
+        if bd is None:
+            bd = BoilerData()
+
         if self._token is None:
             for _ in range(0, 4):
                 if self._login():
@@ -217,7 +220,7 @@ class Boiler:
             el = self._parseXmlData(req.text)
             self.logger.debug(f"Request Response: {req.text}")
             elType = el.get('type')
-            if elType.strip().lower() == 's':
+            if elType is not None and elType.strip().lower() == 's':
                 elVal = el.find("./t[@id='0']").get('v')
                 self.logger.debug(f"EL Val: {elVal}")
                 if 'furnace status' not in elVal.strip().lower():
@@ -280,8 +283,8 @@ class Boiler:
         if val is not None:
             if val > 0:
                 bd.alarmLt = True
-            else:
-                bd.alarmLt = False
+            # else:
+            #     bd.alarmLt = False
             self.logger.debug(f"DATA: Alarm LT: {bd.alarmLt}")
 
         """ Low Water """
@@ -302,6 +305,9 @@ class Boiler:
                 bd.bypass = False
             else:
                 bd.bypass = True
+                bd.lastBypassOpened = arrow.utcnow()
+
+            bd.lastBypassOpenedHuman = bd.lastBypassOpened.humanize()
             self.logger.debug(f"DATA: Bypass: {bd.bypass}")
 
         """ Cold Start """
@@ -363,7 +369,10 @@ class Boiler:
             self._addWaterTemp(bd.waterTemp)
             self._addO2(bd.o2)
 
-        """ Check wood """
+        if self._firstFun and bd.status == BoilerStatus.HEATING:
+            bd.heatingStart = arrow.utcnow().shift(minutes=-(self.config.woodEmptyCheckMins + 1)).replace(second=0)
+
+        """ Calc Values"""
         bd.waterSlope = self._slopeWater()
         bd.tempAvg = self._avgTemp()
         bd.o2Slope = self._slopeO2()
@@ -373,14 +382,23 @@ class Boiler:
         self.logger.debug(f"O2 slope: {bd.o2Slope}")
         self.logger.debug(f"O2 Avg: {bd.o2Avg}")
 
+        """ Check Condensing """
+        if bd.tempAvg <= self.config.condensingTemp:
+            bd.condensing = True
+        else:
+            bd.condensing = False
+        self.logger.debug(f"Condensing: {bd.condensing}")
+
+        """ Check wood """
         if not bd.bypass:  # Bypass closed
+            self.logger.debug("Wood Check Bypass Closed")
             if arrow.utcnow().shift(minutes=-self.config.woodEmptyCheckMins).replace(second=0) > self._lastWoodCheck:
-                # Check wood empty
+                self.logger.debug("Time to check wood")
                 if bd.shutdown:
                     self.logger.warning("Wood off by shutdown")
                     bd.woodEmpty = True
                     bd.woodLow = True
-                elif bd.o2Avg >= self.config.woodEmptyO2 and bd.waterSlope < 0.0 and bd.condensing and bd.status == BoilerStatus.HEATING:
+                elif bd.o2Avg >= self.config.woodEmptyO2 and bd.waterSlope <= 0.0 and bd.condensing and bd.status == BoilerStatus.HEATING:
                     self.logger.warning("Wood off by condensing and high o2")
                     bd.woodEmpty = True
                     bd.woodLow = True
@@ -388,17 +406,12 @@ class Boiler:
                     self.logger.warning("Wood off by low temperature")
                     bd.woodEmpty = True
                     bd.woodLow = True
-                else:
-                    bd.woodEmpty = False
-                    bd.woodLow = False
 
                 # Check wood low
-                if bd.o2Avg >= self.config.woodLowO2 and bd.waterSlope < 0.0 and not bd.condensing and bd.status == BoilerStatus.HEATING and \
-                        arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(seconds=0) > bd.heatingStart:
+                if bd.o2Avg >= self.config.woodLowO2 and bd.waterSlope <= 0.0 and not bd.condensing and bd.status == BoilerStatus.HEATING and \
+                        arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(second=0) > bd.heatingStart:
                     # High O2 and cooling-off while heating for some time means low wood
                     bd.woodLow = True
-                elif not bd.woodEmpty:
-                    bd.woodLow = False
 
                 # Update last wood check
                 self._lastWoodCheck = arrow.utcnow()
@@ -408,18 +421,17 @@ class Boiler:
             bd.woodLow = False
             # Update last wood check plus some extra time
             self._lastWoodCheck = arrow.utcnow().shift(minutes=+self.config.bypassOpenedWoodCheckMins)
+        self.logger.debug(f"Wood: Empty = {bd.woodEmpty} Low = {bd.woodLow}")
 
         """ Check Timer Cycle """
         if bd.status == BoilerStatus.IDLE and bd.fan:
             bd.status = BoilerStatus.TIMER_CYCLE
 
-        """ Check Condensing """
-        if bd.tempAvg <= self.config.condensingTemp:
-            bd.condensing = True
-        else:
-            bd.condensing = False
-        self.logger.debug(f"Condensing: {bd.condensing}")
+        """ Check Alarm Light """
+        if bd.status not in [BoilerStatus.ERROR, BoilerStatus.NONE, BoilerStatus.LOW_TEMP, BoilerStatus.OFFLINE]:
+            bd.alarmLt = False
 
+        """ Finish """
         self.lastUpdate = arrow.utcnow()
         self.logger.info(f"Boiler updated. < {self.lastUpdate} >")
         self.logger.info(f"Boiler Data: {bd}")

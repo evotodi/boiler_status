@@ -1,12 +1,14 @@
 from __future__ import annotations
 import logging
 import atexit
+import os
 import signal
 import sys
 
 import requests
+import arrow
 
-from Models.BoilerData import BoilerData
+from Models.BoilerData import BoilerData, BoilerStatus
 from Models.config import Config
 from homie_spec import Node as HomieNode, Property as HomieProperty, Message as HomieMessage
 from homie_spec.properties import Datatype as HomieDataType
@@ -14,8 +16,8 @@ from Utils.HomieDevice import Device as HomieDevice, DeviceState as HomieDeviceS
 from Utils.MQTT import MQTT
 from Utils.Boiler import Boiler
 
-loglevel = logging.INFO
-version: str = "1.0.5"
+loglevel = os.environ.get("LOGLEVEL", "INFO").upper()
+version: str = "1.0.6"
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
@@ -32,6 +34,7 @@ config = Config()
 boiler = Boiler()
 currentBoilerData = BoilerData()
 boilerDev = None  # type: HomieDevice or None
+lastPublishHomie: arrow.Arrow = arrow.utcnow()
 
 def register_exit_func(fun, signals=_exit_signals):
     """Register a function which will be executed on clean interpreter
@@ -137,6 +140,8 @@ def publishBoilerDevice() -> HomieDevice:
             "wood_low": HomieProperty(name="Wood Low", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.woodLow else "OFF"),
             "condensing": HomieProperty(name="Condensing", datatype=HomieDataType.BOOLEAN, get=lambda: "ON" if currentBoilerData.condensing else "OFF"),
             "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status.value.title()),
+            "last_bp_open": HomieProperty(name="Last Bypass Opened", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastBypassOpened.isoformat()),
+            "last_bp_open_human": HomieProperty(name="Last Bypass Opened Human", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastBypassOpenedHuman.title()),
         }
     )
     _boilerDevice = HomieDevice(id="boiler", name="Boiler", nodes={"heatmaster": node}, fw=version)
@@ -164,6 +169,8 @@ def publishBoilerData(boilerDevice: HomieDevice):
     _publishHomie(boilerDevice, 'heatmaster/wood_low')
     _publishHomie(boilerDevice, 'heatmaster/condensing')
     _publishHomie(boilerDevice, 'heatmaster/status')
+    _publishHomie(boilerDevice, 'heatmaster/last_bp_open')
+    _publishHomie(boilerDevice, 'heatmaster/last_bp_open_human')
     logger.info("Published Boiler MQTT Data")
 
 def publishBoilerStatus(status: str):
@@ -175,31 +182,35 @@ if __name__ == '__main__':
     # mqtt.verbose = True
     mqtt.begin()
 
-    connFailed = False
     try:
         currentBoilerData = boiler.getData()
     except requests.exceptions.ConnectionError as ce:
         print(ce)
-        connFailed = True
+        logger.warning("Boiler is offline")
+        currentBoilerData = boiler.getOfflineData()
 
     boilerDev = publishBoilerDevice()
     publishBoilerStatus(HomieDeviceState.READY.payload)
 
     while True:
+        """ Boiler Publish """
         if boiler.timeToUpdate():
             logger.info("Time to update boiler")
 
-            connFailed = False
             try:
                 currentBoilerData = boiler.getData()
             except requests.exceptions.ConnectionError as ce:
                 print(ce)
-                connFailed = True
-
-            if not connFailed:
-                currentBoilerData = boiler.getData()
-            else:
                 logger.warning("Boiler is offline")
                 currentBoilerData = boiler.getOfflineData()
 
             publishBoilerData(boilerDev)
+
+        """ Homie Status Publish """
+        if arrow.utcnow().shift(seconds=-config.homiePublishStatusSeconds) > lastPublishHomie:
+            if currentBoilerData.status == BoilerStatus.OFFLINE:
+                publishBoilerStatus(HomieDeviceState.LOST.payload)
+            else:
+                publishBoilerStatus(HomieDeviceState.READY.payload)
+
+            lastPublishHomie = arrow.utcnow()

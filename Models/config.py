@@ -13,6 +13,7 @@ class Config(BaseModel):
     mqttPasswd: str = 'Isabelle2014'
     mqttBaseTopic: str = 'homie/'
 
+    homiePublishStatusSeconds: int = 15  # How often to publish the homie status
     updateBoilerSeconds: int = 15  # How often to update the boiler data in seconds
     shutdownTemp: float = 119.0  # Temp where boiler shuts down
     woodEmptyO2: float = 15.0  # O2 percent when no wood in boiler or wood is not burning
