@@ -18,6 +18,7 @@ class BoilerStatus(Enum):
     COLD_START = "cold start mode"
     LOW_TEMP = "low temp"
     OFFLINE = "offline"
+    ALARM = "alarm"
     ERROR = "ERROR"  # Not actual status message.
     NONE = ""  # Not actual status message.
 
@@ -26,6 +27,9 @@ class TrackedBool:
 
     def __init__(self, default: bool):
         self._value: bool = default
+
+    def __bool__(self) -> bool:
+        return self._value
 
     @property
     def value(self) -> bool:

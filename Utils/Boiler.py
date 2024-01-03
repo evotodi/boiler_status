@@ -5,6 +5,7 @@ __all__ = [
 ]
 
 import logging
+import re
 import time
 import zlib
 from random import randint
@@ -47,6 +48,7 @@ class Boiler:
     def __init__(self, db: Dbase):
         self.config = Config()
         self._db = db
+        self._initBoilerData()
 
     @staticmethod
     def _regressO2(val: int) -> float:
@@ -100,6 +102,9 @@ class Boiler:
         if x > 100.0:
             x = 100.0
         return x
+
+    def _initBoilerData(self):
+        self.boilerData.lastBypassOpened = self._db.lastBypassOpened()
 
     def _login(self) -> bool:
         self._session = requests.Session()
@@ -226,7 +231,10 @@ class Boiler:
             if elType is not None and elType.strip().lower() == 's':
                 elVal = el.find("./t[@id='0']").get('v')
                 self.logger.debug(f"EL Val: {elVal}")
-                if 'furnace status' not in elVal.strip().lower():
+                if '*alarm*' in elVal.strip().lower():
+                    self.logger.warning("Alarm status found")
+                    break
+                elif 'furnace status' not in elVal.strip().lower():
                     # Click up arrow and try again
                     self.logger.debug("Not status click up arrow")
                     self._session.post(url=self.config.hmUrl, data="MSGCLICK:bm,1,1")
@@ -247,6 +255,7 @@ class Boiler:
         self.logger.debug("Getting status")
         elVal = el.find("./t[@id='1']").get('v')
         statusTemporary = elVal.strip().lower()
+        statusTemporary = re.sub(r'[^a-z0-9 ]', '', statusTemporary)
         try:
             bd.status = BoilerStatus(statusTemporary)
         except ValueError as ve:
@@ -307,6 +316,7 @@ class Boiler:
         """ Bypass """
         req = self._session.post(url=self.config.hmUrl, headers={'Security-Hint': self._token}, data="GETVARS:v0,129,0,1,1,1")
         val = self._parseXml(req.text)
+        self.logger.debug(f"DATA: Bypass request resp = {req.text}  val = {val}")
         if val is not None:
             if val > 0:
                 bd.bypass.value = False
@@ -412,6 +422,10 @@ class Boiler:
                     self.logger.warning("Wood off by shutdown")
                     bd.woodEmpty = True
                     bd.woodLow = True
+                elif bd.status == BoilerStatus.LOW_TEMP:
+                    self.logger.warning("Wood off by low temp")
+                    bd.woodEmpty = True
+                    bd.woodLow = True
                 elif bd.o2Avg >= self.config.woodEmptyO2 and bd.waterSlope <= 0.0 and bd.condensing and bd.status == BoilerStatus.HEATING:
                     self.logger.warning("Wood off by condensing and high o2")
                     bd.woodEmpty = True
@@ -431,6 +445,7 @@ class Boiler:
                 self._lastWoodCheck = arrow.utcnow()
 
         else:  # Bypass open
+            self.logger.debug("Wood Check Bypass Open")
             bd.woodEmpty = False
             bd.woodLow = False
             # Update last wood check plus some extra time

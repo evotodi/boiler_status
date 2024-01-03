@@ -48,6 +48,17 @@ class Dbase:
     def eventColdStart(cls, value: bool, ts: arrow.Arrow = None):
         cls._addEvent(event=Events.ColdStart, ts=ts, value=json.dumps(value))
 
+    @classmethod
+    def lastBypassOpened(cls) -> arrow.Arrow:
+        # noinspection PyUnresolvedReferences
+        x = Event.select().where(Event.eventType == Events.Bypass.value).order_by(Event.ts.desc()).limit(1).first()  # type: Event
+        try:
+            # noinspection PyTypeChecker
+            return arrow.get(x.ts)
+        except AttributeError:
+            return arrow.get(0)
+
+
 class BaseModel(Model):
     class Meta:
         database = Dbase.db

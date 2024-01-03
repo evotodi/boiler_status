@@ -39,7 +39,8 @@ mqtt: MQTT = None
 node: HomieNode = None
 boilerDev: HomieDevice = HomieDevice(id="boiler", name="Boiler", fw=version, nodes={'heatmaster': node})
 config = Config()
-boiler = Boiler(db=db)
+# noinspection PyTypeChecker
+boiler: Boiler = None
 currentBoilerData = BoilerData()
 lastPublishHomie: arrow.Arrow = arrow.utcnow()
 
