@@ -69,6 +69,8 @@ class BoilerData(BaseModel):
     condensing: bool = False  # ON = Creosote forming, OFF = Heating properly
     lastBypassOpened: Optional[arrow.Arrow] = arrow.get(0)
     lastBypassOpenedHuman: str = ""
+    lastWoodFilled: Optional[arrow.Arrow] = arrow.get(0)
+    lastWoodFilledHuman: str = ""
 
     class Config:
         arbitrary_types_allowed = True

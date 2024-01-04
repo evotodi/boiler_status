@@ -22,7 +22,7 @@ class Config(BaseModel):
     woodEmptyCheckMins: int = 20  # How many minutes between wook checks
     woodLowHeatingMins: int = 60  # How many minutes heating cycle need to run before low wood check
     bypassOpenedWoodCheckMins: int = 30  # How many minutes to wait before checking if wood is low or empty
-
+    woodLowCalcOffsetHours: int = -3  # How many hours to offset the calculated next wood fill needed
     # These should match the boiler settings
     botAirMin: float = 0.0
     botAirMax: float = 100.0

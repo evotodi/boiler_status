@@ -165,6 +165,9 @@ def makeHomieNode():
             "status": HomieProperty(name="Status", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.status.value.title()),
             "last_bp_open": HomieProperty(name="Last Bypass Opened", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastBypassOpened.isoformat()),
             "last_bp_open_human": HomieProperty(name="Last Bypass Opened Human", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastBypassOpenedHuman.title()),
+            "last_wood_fill": HomieProperty(name="Last Wood Fill", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastWoodFilled.isoformat()),
+            "last_wood_fill_human": HomieProperty(name="Last Wood Fill Human", datatype=HomieDataType.STRING, get=lambda: currentBoilerData.lastWoodFilledHuman.title()),
+
             "wood_filled": HomieProperty(name="Wood Filled", datatype=HomieDataType.STRING, get=lambda: "", set=lambda x: print(f"SET HERE = {x}"), settable=True)
         }
     )

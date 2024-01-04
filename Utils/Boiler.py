@@ -17,6 +17,7 @@ import arrow
 import requests
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
+import pandas as pd
 
 from Database.Database import Dbase
 from Models.BoilerData import BoilerData, BoilerStatus
@@ -25,6 +26,7 @@ from Models.config import Config
 if TYPE_CHECKING:
     # noinspection PyProtectedMember
     from scipy.stats._stats_mstats_common import LinregressResult
+    from Database.Models.Event import EventData
 
 class Boiler:
     logger = logging.getLogger()
@@ -104,7 +106,10 @@ class Boiler:
         return x
 
     def _initBoilerData(self):
-        self.boilerData.lastBypassOpened = self._db.lastBypassOpened()
+        self.boilerData.lastBypassOpened = self._db.lastBypassOpened().ts
+        self.logger.debug(f"Boiler bypass last opened: {self.boilerData.lastBypassOpened}")
+        self.boilerData.lastWoodFilled = self._db.lastWoodFilled().ts
+        self.logger.debug(f"Boiler wood last filled: {self.boilerData.lastWoodFilled}")
 
     def _login(self) -> bool:
         self._session = requests.Session()
@@ -199,6 +204,7 @@ class Boiler:
         bd = self.boilerData
         if bd is None:
             bd = BoilerData()
+            self.logger.debug("NEW BOILER DATA CREATED")
 
         if self._token is None:
             for _ in range(0, 4):
@@ -209,6 +215,8 @@ class Boiler:
                 return
 
         bd.ts = arrow.utcnow()
+        bd.lastWoodFilled = self._db.lastWoodFilled().ts
+        bd.lastWoodFilledHuman = bd.lastWoodFilled.humanize()
 
         req = self._session.post(url=self.config.hmUrl, data="GETSTDG")
         if "Running" not in req.text:
@@ -264,10 +272,24 @@ class Boiler:
         self.logger.debug(f"DATA: Status: {bd.status}")
 
         """ Check heating cycle started """
+        # First run check
+        if bd.status == BoilerStatus.HEATING and self._firstFun:
+            lastHeating = self._db.lastHeating()  # type: EventData
+            self.logger.debug(f"Last Heating DB: {lastHeating}")
+
+            if lastHeating is not None and lastHeating.value:
+                bd.heatingStart = lastHeating.ts
+            self.logger.debug(f"Heating start first run: {bd.heatingStart}")
+
+        # Normal checks
         if bd.status == BoilerStatus.HEATING and bd.heatingStart is None:
             bd.heatingStart = arrow.utcnow()
-        else:
+            self._db.eventHeating(True, arrow.utcnow())
+        elif bd.status != BoilerStatus.HEATING and bd.heatingStart is not None:
             bd.heatingStart = None
+            self._db.eventHeating(False, arrow.utcnow())
+
+        self.logger.debug(f"Heating start: {bd.heatingStart}")
 
         """ Fan """
         req = self._session.post(url=self.config.hmUrl, data="GETVARS:v0,130,0,0,1,1")
@@ -414,6 +436,8 @@ class Boiler:
         self.logger.debug(f"Condensing: {bd.condensing}")
 
         """ Check wood """
+        self._calcNextWoodFill()
+
         if not bd.bypass:  # Bypass closed
             self.logger.debug("Wood Check Bypass Closed")
             if arrow.utcnow().shift(minutes=-self.config.woodEmptyCheckMins).replace(second=0) > self._lastWoodCheck:
@@ -435,14 +459,25 @@ class Boiler:
                     bd.woodEmpty = True
                     bd.woodLow = True
 
-                # Check wood low
-                if bd.o2Avg >= self.config.woodLowO2 and bd.waterSlope <= 0.0 and not bd.condensing and bd.status == BoilerStatus.HEATING and \
-                        arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(second=0) > bd.heatingStart:
-                    # High O2 and cooling-off while heating for some time means low wood
-                    bd.woodLow = True
-
                 # Update last wood check
                 self._lastWoodCheck = arrow.utcnow()
+
+            # Check wood low
+            if bd.o2Avg >= self.config.woodLowO2 and \
+                    bd.waterSlope <= 0.0 and \
+                    not bd.condensing and \
+                    bd.status == BoilerStatus.HEATING and \
+                    arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(second=0) > bd.lastWoodFilled:
+
+                if arrow.utcnow().shift(minutes=-self.config.woodLowHeatingMins).replace(second=0) > bd.heatingStart or self._firstFun:
+                    # High O2 and cooling-off while heating for some time means low wood
+                    bd.woodLow = True
+                    self.logger.debug("Wood low")
+                else:
+                    self.logger.debug("Wood low. Not set because it is not time yet")
+            elif arrow.utcnow() > self._calcNextWoodFill():
+                bd.woodLow = True
+                self.logger.debug("Wood low by time")
 
         else:  # Bypass open
             self.logger.debug("Wood Check Bypass Open")
@@ -451,6 +486,11 @@ class Boiler:
             # Update last wood check plus some extra time
             self._lastWoodCheck = arrow.utcnow().shift(minutes=+self.config.bypassOpenedWoodCheckMins)
         self.logger.debug(f"Wood: Empty = {bd.woodEmpty} Low = {bd.woodLow}")
+
+        if bd.heatingStart is not None:
+            self.logger.debug(f"Heating Start: {bd.heatingStart.format()}")
+        else:
+            self.logger.debug(f"Heating Start: None")
 
         """ Check Timer Cycle """
         if bd.status == BoilerStatus.IDLE and bd.fan and not bd.bypass:
@@ -470,6 +510,44 @@ class Boiler:
         """ First run done """
         if self._firstFun:
             self._firstFun = False
+
+    def _calcNextWoodFill(self) -> arrow.Arrow:
+        # Read sqlite query results into a pandas DataFrame
+        df = pd.read_sql_query("SELECT ts as ds FROM event WHERE eventType == 'wood_filled' ORDER BY id DESC LIMIT 50", self._db.connection)
+
+        # Add a y column
+        df.insert(1, 'y', 0, True)
+
+        # Convert column ds to datetimes
+        for idx, row in df.iterrows():
+            df.loc[idx, 'ds'] = arrow.get(row['ds']).naive
+
+        df['ds'] = pd.DatetimeIndex(df['ds'])
+        df = df.astype({"y": float})
+
+        # Calculate total seconds between events
+        for idx, row in df.iterrows():
+            if idx != 0:
+                cur = arrow.get(row['ds'])
+                # noinspection PyTypeChecker
+                prev = arrow.get(df.iloc[idx - 1]['ds'])
+                secs = (prev - cur).total_seconds()
+                df.loc[idx, 'y'] = secs / 60
+
+        # Index 0's y value
+        df.loc[0, 'y'] = df.loc[1, 'y']
+
+        # Calculate the mean of y
+        meanMins = df.loc[:, 'y'].mean()
+
+        # Get last wood fill
+        lastFill = self._db.lastWoodFilled().ts
+        # Shift if forward meanMins
+        nextFill = lastFill.shift(minutes=meanMins)
+        # Offset next fill by woodLowCalcOffsetHours
+        nextFill = nextFill.shift(hours=self.config.woodLowCalcOffsetHours)
+
+        return nextFill
 
     def getData(self) -> BoilerData:
         if arrow.utcnow().shift(seconds=-self.config.updateBoilerSeconds) > self.lastUpdate:
