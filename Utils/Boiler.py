@@ -513,7 +513,7 @@ class Boiler:
 
     def _calcNextWoodFill(self) -> arrow.Arrow:
         # Read sqlite query results into a pandas DataFrame
-        df = pd.read_sql_query("SELECT ts as ds FROM event WHERE eventType == 'wood_filled' ORDER BY id DESC LIMIT 50", self._db.connection)
+        df = pd.read_sql_query(f"SELECT ts as ds FROM event WHERE eventType == 'wood_filled' ORDER BY id DESC LIMIT {self.config.woodCalcLimit}", self._db.connection)
 
         # Add a y column
         df.insert(1, 'y', 0, True)
@@ -523,6 +523,8 @@ class Boiler:
             df.loc[idx, 'ds'] = arrow.get(row['ds']).naive
 
         df['ds'] = pd.DatetimeIndex(df['ds'])
+
+        # Convert y to floats
         df = df.astype({"y": float})
 
         # Calculate total seconds between events
@@ -537,8 +539,16 @@ class Boiler:
         # Index 0's y value
         df.loc[0, 'y'] = df.loc[1, 'y']
 
+        # Drop the upper and lower 1% outliers
+        df_sub = df.loc[:, ['ds', 'y']]
+        lim = np.logical_and(df_sub['y'] < df_sub['y'].quantile(0.99),
+                             df_sub['y'] > df_sub['y'].quantile(0.01))
+
+        df.loc[:, ['y']] = df_sub.where(lim, np.nan)
+        df.dropna(inplace=True)
+
         # Calculate the mean of y
-        meanMins = df.loc[:, 'y'].mean()
+        meanMins = np.mean(df.loc[:, 'y'])
 
         # Get last wood fill
         lastFill = self._db.lastWoodFilled().ts
@@ -546,6 +556,8 @@ class Boiler:
         nextFill = lastFill.shift(minutes=meanMins)
         # Offset next fill by woodLowCalcOffsetHours
         nextFill = nextFill.shift(hours=self.config.woodLowCalcOffsetHours)
+
+        self.logger.debug(f"Next calculated fill: {nextFill}")
 
         return nextFill
 
@@ -578,3 +590,7 @@ class Boiler:
         self.lastUpdate = arrow.utcnow()
 
         return bd
+
+    def woodFilled(self):
+        self.boilerData.woodLow = False
+        self.boilerData.woodEmpty = False

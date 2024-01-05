@@ -20,22 +20,42 @@ class MQTT:
     _began = False
     _subscriptions: List[Tuple[str, int]] = []
     _onMessage: Callable = None
+    _onConnect: Callable = None
+    _onDisconnect: Callable = None
+    _onSubscribe: Callable = None
     _debug = False
     _mqttVerbose: bool = False
+    disconnectCode: int = 0
 
-    def __init__(self, clientId: str, onMessage: Callable):
+    def __init__(self, clientId: str, onMessage: Callable, onConnect: Callable = None, onDisconnect: Callable = None, onSubscribe: Callable = None):
         self.client = mqtt.Client(protocol=paho.mqtt.client.MQTTv311, client_id=clientId, clean_session=False)
         self.config = Config()
         self._onMessage = onMessage
+        self._onConnect = onConnect
+        self._onDisconnect = onDisconnect
+        self._onSubscribe = onSubscribe
 
     def begin(self):
         if self._mqttVerbose:
             self.client.enable_logger(self.logger)
 
-        self.client.on_connect = self._onConnect
         self.client.on_message = self._onMessage
-        self.client.on_disconnect = self._onDisconnect
-        self.client.on_subscribe = self._onSubscribe
+
+        if self._onConnect is not None:
+            self.client.on_connect = self._onConnect
+        else:
+            self.client.on_connect = self._onConnectDefault
+
+        if self._onDisconnect is not None:
+            self.client.on_disconnect = self._onDisconnect
+        else:
+            self.client.on_disconnect = self._onDisconnectDefault
+
+        if self._onSubscribe is not None:
+            self.client.on_subscribe = self._onSubscribe
+        else:
+            self.client.on_subscribe = self._onSubscribeDefault
+
         self.client.max_inflight_messages_set(100)
         self.client.username_pw_set(username=self.config.mqttUser, password=self.config.mqttPasswd)
         self.client.connect(self.config.mqttServer)
@@ -66,19 +86,20 @@ class MQTT:
             self.logger.debug(f"Subscribed to {topic} with qos: {qos}")
 
     # noinspection PyUnusedLocal
-    def _onConnect(self, client, userdata, flags, rc):
+    def _onConnectDefault(self, client, userdata, flags, rc):
         if self._debug:
             self.logger.debug(f"Connected with result code {rc}")
         if len(self._subscriptions) > 0:
             client.subscribe(self._subscriptions)
 
     # noinspection PyUnusedLocal
-    def _onDisconnect(self, client, userdata, rc):
+    def _onDisconnectDefault(self, client, userdata, rc):
+        self.disconnectCode = rc
         if self._debug:
             self.logger.debug(f"Disconnected with result code {rc}")
 
     # noinspection PyUnusedLocal
-    def _onSubscribe(self, client, userdata, mid, granted_qos):
+    def _onSubscribeDefault(self, client, userdata, mid, granted_qos):
         if self._debug:
             self.logger.debug(f"Subscribed with mid {mid} and qos {granted_qos}")
 

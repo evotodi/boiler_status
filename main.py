@@ -183,6 +183,7 @@ def onMessage(client, userdata, message: MQTTMessage) -> None:
     if message.topic == topicWoodFilled and message.payload != "":
         logger.info(f"Wood Filled: {message.payload}")
         db.eventWoodFilled(ts=arrow.get(message.payload.decode()))
+        boiler.woodFilled()
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)-16s %(levelname)-8s %(message)s', level=loglevel)
@@ -209,6 +210,10 @@ if __name__ == '__main__':
 
     makeHomieNode()
     publishBoilerDevice()
+
+    if mqtt.disconnectCode == 7:
+        raise OSError("MQTT Client ID exists! Another boiler program is running")
+
     publishBoilerData()
 
     while True:
