@@ -22,6 +22,7 @@ class Config(BaseModel):
     woodEmptyCheckMins: int = 20  # How many minutes between wook checks
     woodLowHeatingMins: int = 60  # How many minutes heating cycle need to run before low wood check
     bypassOpenedWoodCheckMins: int = 30  # How many minutes to wait before checking if wood is low or empty
+    bypassWoodFilledMins: int = 120  # How many minutes between bypass open to count as a wood fill event
     woodLowCalcOffsetHours: int = -3  # How many hours to offset the calculated next wood fill needed
     woodCalcLimit: int = 20  # Select the last n wood fills for calc
 

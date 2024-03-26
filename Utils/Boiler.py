@@ -45,6 +45,7 @@ class Boiler:
     _firstFun = True
     _session = requests.Session()
     _lastWoodCheck: arrow.Arrow = arrow.get(0)
+    _lastBypassWoodFill: arrow.Arrow = arrow.get(0)
     _db: Dbase = None
 
     def __init__(self, db: Dbase):
@@ -485,6 +486,13 @@ class Boiler:
             bd.woodLow = False
             # Update last wood check plus some extra time
             self._lastWoodCheck = arrow.utcnow().shift(minutes=+self.config.bypassOpenedWoodCheckMins)
+            # Check if time to count as a wood fill event
+            if arrow.utcnow().shift(minutes=-self.config.bypassWoodFilledMins).replace(second=0) > self._lastBypassWoodFill:
+                self._lastBypassWoodFill = arrow.utcnow()
+                self._db.eventWoodFilled(ts=arrow.utcnow())
+                bd.lastWoodFilled = self._db.lastWoodFilled().ts
+                bd.lastWoodFilledHuman = bd.lastWoodFilled.humanize()
+
         self.logger.debug(f"Wood: Empty = {bd.woodEmpty} Low = {bd.woodLow}")
 
         if bd.heatingStart is not None:
