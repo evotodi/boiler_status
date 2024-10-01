@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = [
     "BoilerData",
     "BoilerStatus",
+    "TrackedBool"
 ]
 
 from typing import Optional
@@ -20,10 +21,12 @@ class BoilerStatus(Enum):
     OFFLINE = "offline"
     ALARM = "alarm"
     ERROR = "ERROR"  # Not actual status message.
+    PUB_SHUTDOWN = "PUBLISHER SHUTDOWN"  # Not actual status message.
     NONE = ""  # Not actual status message.
 
 class TrackedBool:
     changed: bool = False
+    _value: bool = False
 
     def __init__(self, default: bool):
         self._value: bool = default
@@ -44,7 +47,7 @@ class TrackedBool:
             self.changed = False
 
 class BoilerData(BaseModel):
-    ts: Optional[arrow.Arrow]
+    ts: Optional[arrow.Arrow] = None
     coldStart: TrackedBool = TrackedBool(False)  # ON = cold start pressed
     highLimit: bool = None  # ON = temp to high
     lowWater: bool = None  # ON = water low

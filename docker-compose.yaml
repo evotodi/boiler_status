@@ -7,5 +7,9 @@ services:
     init: true
     volumes:
       - $PWD/Store:/app/Store
-#    environment:
-#      - LOGLEVEL=DEBUG
+    environment:
+#      LOG_LEVEL: DEBUG
+      HM_URL: http://192.168.12.220
+      MQTT_BROKER: mqtt
+      MQTT_USER: boiler
+      MQTT_PASSWORD: boiler

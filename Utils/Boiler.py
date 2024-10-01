@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 
 from Database.Database import Dbase
-from Models.BoilerData import BoilerData, BoilerStatus
+from Models.BoilerData import BoilerData, BoilerStatus, TrackedBool
 from Models.config import Config
 
 if TYPE_CHECKING:
@@ -137,7 +137,7 @@ class Boiler:
         self.logger.debug(f"Login response = {req1.text}")
         ret = req1.text.split(',')
         if len(ret) == 3 and ret[0] == "700":
-            pwToken = f"{self.config.passwd}+{ret[2]}"
+            pwToken = f"{self.config.hmPassword}+{ret[2]}"
             pwToken = pwToken[0:32]
             self.logger.debug(f"pwToken = {pwToken}")
             pwTokenCrc = zlib.crc32(pwToken.encode())
@@ -586,16 +586,22 @@ class Boiler:
         bd = BoilerData()
         bd.ts = arrow.utcnow()
         bd.status = BoilerStatus.OFFLINE
-        bd.coldStart = False
+        bd.coldStart = TrackedBool(False)
         bd.highLimit = False
         bd.alarmLt = True
         bd.lowWater = False
         bd.fan = False
-        bd.shutdown = True
+        bd.shutdown = TrackedBool(True)
         bd.waterTemp = False
         bd.woodEmpty = False
         bd.woodLow = False
         self.lastUpdate = arrow.utcnow()
+
+        return bd
+
+    def getPublisherShutdownData(self) -> BoilerData:
+        bd = self.getOfflineData()
+        bd.status = BoilerStatus.PUB_SHUTDOWN
 
         return bd
 

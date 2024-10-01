@@ -118,7 +118,11 @@ def register_exit_func(fun, signals=_exit_signals):
 
 @register_exit_func
 def shutdown():
+    global currentBoilerData
     logger.warning("Shutdown")
+    currentBoilerData = boiler.getPublisherShutdownData()
+    makeHomieNode()
+    publishBoilerData()
     publishBoilerStatus(HomieDeviceState.DISCONNECTED.payload)
     mqtt.stop()
 
@@ -196,8 +200,11 @@ if __name__ == '__main__':
 
     boiler = Boiler(db=db)
 
-    mqtt = MQTT(clientId="boiler", onMessage=onMessage)
-    mqtt.debug = True
+    mqtt = MQTT(clientId=os.environ.get('MQTT_CLIENT_ID', default='boiler'), onMessage=onMessage)
+    mqttDebug = False
+    if 'MQTT_DEBUG' in os.environ:
+        mqttDebug = True
+    mqtt.debug = mqttDebug
     mqtt.subscribe(topic=topicWoodFilled, qos=1)
     mqtt.begin()
 
