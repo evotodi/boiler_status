@@ -191,6 +191,9 @@ def onMessage(client, userdata, message: MQTTMessage) -> None:
 
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)-16s %(levelname)-8s %(message)s', level=loglevel)
+
+    logger.info(config.model_dump_json(indent=4))
+
     if not os.path.exists('./Store/db.sqlite'):
         createDbTables = True
     db = Dbase('./Store/db.sqlite')

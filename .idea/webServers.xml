@@ -3,7 +3,7 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="d32f7673-1624-4e96-9526-1191efbf6b87" name="Docker Boiler">
-        <fileTransfer rootFolder="/root/pythonboilerpublisher" accessType="SFTP" host="docker" port="22" sshConfigId="82a0a3bd-fe32-4fc3-b79f-627ddf0f2579" sshConfig="root@docker:22 key" keyPair="true">
+        <fileTransfer rootFolder="/root/pythonboilerstatus" accessType="SFTP" host="docker" port="22" sshConfigId="82a0a3bd-fe32-4fc3-b79f-627ddf0f2579" sshConfig="root@docker:22 key" keyPair="true">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
