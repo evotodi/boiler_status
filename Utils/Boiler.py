@@ -522,6 +522,10 @@ class Boiler:
     def _calcNextWoodFill(self) -> arrow.Arrow:
         # Read sqlite query results into a pandas DataFrame
         df = pd.read_sql_query(f"SELECT ts as ds FROM event WHERE eventType == 'wood_filled' ORDER BY id DESC LIMIT {self.config.woodCalcLimit}", self._db.connection)
+        if df.size == 0:
+            nextFill = arrow.now().shift(hours=self.config.woodLowCalcOffsetHours)
+            self.logger.warning(f"Database is empty! Calculated next fill is {nextFill}")
+            return nextFill
 
         # Add a y column
         df.insert(1, 'y', 0, True)
