@@ -18,7 +18,7 @@ from Utils.Boiler import Boiler
 from Database.Database import Dbase
 
 loglevel = os.environ.get("LOGLEVEL", "INFO").upper()
-version: str = "1.0.6"
+version: str = "1.0.7"
 _registered_exit_funcs = set()
 _executed_exit_funcs = set()
 _exit_signals = frozenset([
