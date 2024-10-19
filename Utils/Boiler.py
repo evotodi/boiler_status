@@ -10,6 +10,7 @@ import time
 import zlib
 from random import randint
 import numpy as np
+from scipy.constants import minute
 from scipy.stats import linregress
 from typing import TYPE_CHECKING
 
@@ -525,6 +526,17 @@ class Boiler:
         if df.size == 0:
             nextFill = arrow.now().shift(hours=self.config.woodLowCalcOffsetHours)
             self.logger.warning(f"Database is empty! Calculated next fill is {nextFill}")
+
+            # Fill the db with previous wood fill events
+            prevFills = []
+            prevFill = arrow.now()
+            for _ in range(self.config.woodCalcLimit):
+                seconds = (60*60*8) + (randint(0, 50)*60) + randint(0, 59)
+                prevFill = prevFill.shift(seconds=-seconds)
+                prevFills.append(prevFill)
+            for prevFillIter in reversed(prevFills):
+                self._db.eventWoodFilled(ts=prevFillIter)
+
             return nextFill
 
         # Add a y column
@@ -561,6 +573,7 @@ class Boiler:
 
         # Calculate the mean of y
         meanMins = np.mean(df.loc[:, 'y'])
+        self.logger.debug(f"Calculated fill mean mins: {meanMins}")
 
         # Get last wood fill
         lastFill = self._db.lastWoodFilled().ts
